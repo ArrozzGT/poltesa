@@ -1,0 +1,113 @@
+<?php
+class PendaftaranModel {
+    private $db;
+
+    public function __construct() {
+        $this->db = Database::getInstance()->getConnection();
+    }
+
+    public function daftarKepengurusan($data) {
+        try {
+            $query = "INSERT INTO pendaftaran_kepengurusan 
+                    (anggota_id, organisasi_id, jabatan_id_diajukan, divisi_id_diajukan, 
+                    pengalaman_organisasi, motivasi, berkas_tambahan, detail_tambahan, status_pendaftaran, tanggal_daftar) 
+                    VALUES 
+                    (:anggota_id, :organisasi_id, :jabatan_id_diajukan, :divisi_id_diajukan, 
+                    :pengalaman_organisasi, :motivasi, :berkas, :detail, 'pending', NOW())";
+            
+            $stmt = $this->db->prepare($query);
+            return $stmt->execute([
+                ':anggota_id' => $data['anggota_id'],
+                ':organisasi_id' => $data['organisasi_id'],
+                ':jabatan_id_diajukan' => $data['jabatan_id_diajukan'],
+                ':divisi_id_diajukan' => $data['divisi_id_diajukan'], 
+                ':pengalaman_organisasi' => $data['pengalaman_organisasi'], 
+                ':motivasi' => $data['motivasi'],
+                ':berkas' => $data['berkas_tambahan'],
+                ':detail' => $data['detail_tambahan']
+            ]);
+        } catch (PDOException $e) {
+            return false;
+        }
+    }
+    
+    // ... Method lain (getRiwayatKepengurusan, getPendingByOrganisasi) biarkan tetap ada ...
+    // Pastikan method getRiwayatKepengurusan dll tetap ada seperti file sebelumnya
+    public function getRiwayatKepengurusan($anggota_id) {
+        $query = "SELECT pk.*, o.nama_organisasi, j.nama_jabatan 
+                  FROM pendaftaran_kepengurusan pk
+                  JOIN organisasi o ON pk.organisasi_id = o.organisasi_id
+                  JOIN jabatan j ON pk.jabatan_id_diajukan = j.jabatan_id
+                  WHERE pk.anggota_id = :id
+                  ORDER BY pk.tanggal_daftar DESC";
+        $stmt = $this->db->prepare($query);
+        $stmt->execute([':id' => $anggota_id]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    public function getPendingByOrganisasi($organisasi_id) {
+        $query = "SELECT pk.*, a.nama_lengkap, a.nim, a.email, a.jurusan, j.nama_jabatan 
+                  FROM pendaftaran_kepengurusan pk 
+                  JOIN anggota a ON pk.anggota_id = a.anggota_id
+                  JOIN jabatan j ON pk.jabatan_id_diajukan = j.jabatan_id
+                  WHERE pk.organisasi_id = :org_id 
+                  AND (pk.status_pendaftaran = 'pending' OR pk.status_pendaftaran = 'interview')
+                  ORDER BY pk.tanggal_daftar ASC";
+        $stmt = $this->db->prepare($query);
+        $stmt->execute([':org_id' => $organisasi_id]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+    
+    public function getPendaftaranById($id) {
+        $query = "SELECT * FROM pendaftaran_kepengurusan WHERE pendaftaran_kepengurusan_id = :id";
+        $stmt = $this->db->prepare($query);
+        $stmt->execute([':id' => $id]);
+        return $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+
+    // Method baru untuk mengecek status pendaftaran/kepengurusan aktif spesifik untuk user
+    public function cekStatusPendaftaran($anggota_id, $organisasi_id) {
+        // Cek apakah sudah jadi pengurus aktif
+        $query = "SELECT status_aktif FROM kepengurusan WHERE anggota_id = :anggota_id AND organisasi_id = :organisasi_id AND status_aktif = 'active'";
+        $stmt = $this->db->prepare($query);
+        $stmt->execute([':anggota_id' => $anggota_id, ':organisasi_id' => $organisasi_id]);
+        $kepengurusan = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if ($kepengurusan) {
+            return 'approved'; // Berarti dia sudah jadi pengurus aktif
+        }
+
+        // Cek pendaftaran terakhir
+        $query = "SELECT status_pendaftaran FROM pendaftaran_kepengurusan WHERE anggota_id = :anggota_id AND organisasi_id = :organisasi_id ORDER BY tanggal_daftar DESC LIMIT 1";
+        $stmt = $this->db->prepare($query);
+        $stmt->execute([':anggota_id' => $anggota_id, ':organisasi_id' => $organisasi_id]);
+        $pendaftaran = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($pendaftaran) {
+            return strtolower($pendaftaran['status_pendaftaran']); // 'pending', 'rejected', 'interview'
+        }
+
+        return 'belum_daftar';
+    }
+    
+    public function updateStatus($id, $status, $catatan) {
+        $query = "UPDATE pendaftaran_kepengurusan 
+                  SET status_pendaftaran = :status, catatan_admin = :catatan 
+                  WHERE pendaftaran_kepengurusan_id = :id";
+        $stmt = $this->db->prepare($query);
+        return $stmt->execute([':status' => $status, ':catatan' => $catatan, ':id' => $id]);
+    }
+    
+    public function insertPengurusBaru($data) {
+        $query = "INSERT INTO kepengurusan (organisasi_id, anggota_id, jabatan_id, divisi_id, periode_mulai, periode_selesai, status_aktif)
+                  VALUES (:org, :anggota, :jab, :div, CURDATE(), DATE_ADD(CURDATE(), INTERVAL 1 YEAR), 'active')";
+        $stmt = $this->db->prepare($query);
+        return $stmt->execute([
+            ':org' => $data['organisasi_id'],
+            ':anggota' => $data['anggota_id'],
+            ':jab' => $data['jabatan_id_diajukan'],
+            ':div' => $data['divisi_id_diajukan']
+        ]);
+    }
+}
+?>
